@@ -54,3 +54,75 @@ def test_round_trip_current(tmpdir, current_pickle_data):
         result = pd.read_pickle(path)
         assert_geodataframe_equal(result, value)
         assert isinstance(result.has_sindex, bool)
+
+
+def test_pickle_linear_ring():
+    import pickle
+
+    from shapely.geometry import LinearRing, LineString
+
+    import geopandas as gpd
+
+    lr = LinearRing([(0, 0), (1, 1), (1, 0)])
+    ls = LineString([(0, 0), (1, 1)])
+
+    # GeoSeries
+    s = gpd.GeoSeries([lr, ls])
+    unpickled_s = pickle.loads(pickle.dumps(s))
+    assert isinstance(unpickled_s[0], LinearRing)
+    assert isinstance(unpickled_s[1], LineString)
+
+    # GeoDataFrame
+    df = gpd.GeoDataFrame({"geometry": s})
+    unpickled_df = pickle.loads(pickle.dumps(df))
+    assert isinstance(unpickled_df.geometry[0], LinearRing)
+    assert isinstance(unpickled_df.geometry[1], LineString)
+
+
+
+def test_pickle_linear_ring_edge_cases():
+    import pickle
+
+    import numpy as np
+
+    import shapely
+    from shapely.geometry import LinearRing, LineString, Point
+
+    from geopandas.array import GeometryArray, from_shapely
+
+    lr = LinearRing([(0, 0), (1, 1), (1, 0)])
+    lr_3d = LinearRing([(0, 0, 1), (1, 1, 2), (1, 0, 3)])
+    lr_empty = LinearRing()
+    ls = LineString([(0, 0), (1, 1)])
+
+    # 1. Array with no LinearRing
+    ga_no_ring = from_shapely([ls, Point(0, 0)])
+    unp_no_ring = pickle.loads(pickle.dumps(ga_no_ring))
+    assert isinstance(unp_no_ring[0], LineString)
+
+    # 2. Array with various LinearRings (2D, 3D, empty)
+    ga_rings = from_shapely([lr, lr_3d, lr_empty, ls])
+    unp_rings = pickle.loads(pickle.dumps(ga_rings))
+    assert isinstance(unp_rings[0], LinearRing)
+    assert isinstance(unp_rings[1], LinearRing)
+    assert isinstance(unp_rings[2], LinearRing)
+    assert unp_rings[1].has_z
+    assert unp_rings[2].is_empty
+    assert isinstance(unp_rings[3], LineString)
+
+    # 3. Backwards compatibility / dict state handling in __setstate__
+    ga_dict1 = GeometryArray.__new__(GeometryArray)
+    ga_dict1.__setstate__({
+        "_data": np.array([ls, lr], dtype=object),
+        "_crs": None,
+        "_ring_indices": np.array([1])
+    })
+    assert isinstance(ga_dict1[1], LinearRing)
+
+    ga_dict2 = GeometryArray.__new__(GeometryArray)
+    ga_dict2.__setstate__({
+        "_data": shapely.to_wkb(np.array([ls, lr], dtype=object)),
+        "_crs": None,
+        "_ring_indices": np.array([1])
+    })
+    assert isinstance(ga_dict2[1], LinearRing)
